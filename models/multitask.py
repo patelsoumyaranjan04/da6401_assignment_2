@@ -29,7 +29,7 @@ class MultiTaskPerceptionModel(nn.Module):
 
         # ── Download checkpoints from Google Drive ──────────────────────
         import gdown
-        gdown.download(id="<classifier.pth drive id>", output=classifier_path, quiet=False)
+        gdown.download(id="1lOwYE7D2XxpTMsjrk0YUbmCbMBOkPkVR", output=classifier_path, quiet=False)
         gdown.download(id="<localizer.pth drive id>", output=localizer_path, quiet=False)
         gdown.download(id="<unet.pth drive id>", output=unet_path, quiet=False)
         # ────────────────────────────────────────────────────────────────
