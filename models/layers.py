@@ -16,7 +16,10 @@ class CustomDropout(nn.Module):
         Args:
             p: Dropout probability.
         """
-        pass
+        super().__init__()
+        if not 0 <= p <= 1:
+            raise ValueError(f"Dropout probability must be between 0 and 1, got {p}")
+        self.p = p
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -28,5 +31,11 @@ class CustomDropout(nn.Module):
         Returns:
             Output tensor.
         """
-        # TODO: implement dropout.
-        raise NotImplementedError("Implement CustomDropout.forward")
+        if not self.training or self.p == 0.0:
+            return x
+        if self.p == 1.0:
+            return torch.zeros_like(x)
+        # Generate binary mask with probability (1-p) of keeping
+        mask = (torch.rand_like(x) > self.p).float()
+        # Inverted dropout scaling: divide by (1-p) so expected value stays same
+        return x * mask / (1 - self.p)
