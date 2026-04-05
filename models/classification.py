@@ -32,6 +32,12 @@ class VGG11Classifier(nn.Module):
             CustomDropout(p=dropout_p),
             nn.Linear(4096, num_classes),
         )
+        
+        # Init FC layers
+        for m in self.classifier.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
+                nn.init.zeros_(m.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass for classification model.
