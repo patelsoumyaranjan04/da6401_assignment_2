@@ -23,8 +23,13 @@ class VGG11Encoder(nn.Module):
       reducing co-adaptation of feature maps at different spatial resolutions.
     """
 
-    def __init__(self, in_channels: int = 3):
-        """Initialize the VGG11Encoder model."""
+    def __init__(self, in_channels: int = 3, pretrained: bool = True):
+        """Initialize the VGG11Encoder model.
+        
+        Args:
+            in_channels: Number of input channels.
+            pretrained: If True, load ImageNet-pretrained VGG11_BN weights.
+        """
         super().__init__()
         
         # Block 1: 1 conv -> 64, pool  (224 -> 112)
@@ -76,10 +81,14 @@ class VGG11Encoder(nn.Module):
         )
         self.pool5 = nn.MaxPool2d(kernel_size=2, stride=2)
         
-        # Proper weight initialization (critical for training from scratch)
-        self._init_weights()
+        # Initialize weights
+        if pretrained and in_channels == 3:
+            self._load_pretrained()
+        else:
+            self._init_weights()
     
     def _init_weights(self):
+        """Kaiming init for training from scratch."""
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
@@ -88,6 +97,39 @@ class VGG11Encoder(nn.Module):
             elif isinstance(m, nn.BatchNorm2d):
                 nn.init.ones_(m.weight)
                 nn.init.zeros_(m.bias)
+    
+    def _load_pretrained(self):
+        """Load ImageNet-pretrained VGG11_BN weights into our custom architecture."""
+        import torchvision.models as tv_models
+        pretrained = tv_models.vgg11_bn(weights='IMAGENET1K_V1')
+        
+        # Mapping: our block layers -> torchvision features indices
+        # torchvision vgg11_bn features layout:
+        # 0:Conv 1:BN 2:ReLU 3:MaxPool
+        # 4:Conv 5:BN 6:ReLU 7:MaxPool
+        # 8:Conv 9:BN 10:ReLU 11:Conv 12:BN 13:ReLU 14:MaxPool
+        # 15:Conv 16:BN 17:ReLU 18:Conv 19:BN 20:ReLU 21:MaxPool
+        # 22:Conv 23:BN 24:ReLU 25:Conv 26:BN 27:ReLU 28:MaxPool
+        mapping = {
+            'block1.0': 0,  'block1.1': 1,
+            'block2.0': 4,  'block2.1': 5,
+            'block3.0': 8,  'block3.1': 9,  'block3.3': 11, 'block3.4': 12,
+            'block4.0': 15, 'block4.1': 16, 'block4.3': 18, 'block4.4': 19,
+            'block5.0': 22, 'block5.1': 23, 'block5.3': 25, 'block5.4': 26,
+        }
+        
+        new_state = self.state_dict()
+        for our_name, pt_idx in mapping.items():
+            pt_module = pretrained.features[pt_idx]
+            for param_name in ['weight', 'bias', 'running_mean', 'running_var', 'num_batches_tracked']:
+                full_key = f"{our_name}.{param_name}"
+                if full_key in new_state and hasattr(pt_module, param_name):
+                    src = getattr(pt_module, param_name)
+                    if src is not None:
+                        new_state[full_key] = src
+        
+        self.load_state_dict(new_state)
+        del pretrained  # free memory
 
     def forward(
         self, x: torch.Tensor, return_features: bool = False
