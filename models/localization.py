@@ -35,6 +35,12 @@ class VGG11Localizer(nn.Module):
             nn.Linear(1024, 4),
             nn.Sigmoid(),  # outputs in [0,1], then scale to pixel space
         )
+        
+        # Init FC layers
+        for m in self.regressor.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
+                nn.init.zeros_(m.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass for localization model.
