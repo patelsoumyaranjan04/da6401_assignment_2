@@ -1,12 +1,36 @@
 """Unified multi-task model
 """
 
+import os
 import torch
 import torch.nn as nn
 from .vgg11 import VGG11Encoder
 from .classification import VGG11Classifier
 from .localization import VGG11Localizer
 from .segmentation import VGG11UNet
+
+
+# Google Drive file IDs — REPLACE these with your actual IDs
+DRIVE_IDS = {
+    "classifier": "<classifier.pth drive id>",
+    "localizer": "<localizer.pth drive id>",
+    "unet": "<unet.pth drive id>",
+}
+
+
+def _download_if_needed(drive_id, output_path):
+    """Download from Google Drive if file doesn't exist locally."""
+    if os.path.exists(output_path):
+        return True
+    if drive_id.startswith("<"):
+        return False
+    try:
+        import gdown
+        gdown.download(id=drive_id, output=output_path, quiet=False)
+        return os.path.exists(output_path)
+    except Exception as e:
+        print(f"Download failed for {output_path}: {e}")
+        return False
 
 
 class MultiTaskPerceptionModel(nn.Module):
@@ -27,35 +51,36 @@ class MultiTaskPerceptionModel(nn.Module):
         """
         super().__init__()
 
-        # ── Download checkpoints from Google Drive ──────────────────────
-        import gdown
-        gdown.download(id="1lOwYE7D2XxpTMsjrk0YUbmCbMBOkPkVR", output=classifier_path, quiet=False)
-        # gdown.download(id="<localizer.pth drive id>", output=localizer_path, quiet=False)
-        # gdown.download(id="<unet.pth drive id>", output=unet_path, quiet=False)
-        # ────────────────────────────────────────────────────────────────
+        # Download checkpoints from Google Drive if needed
+        _download_if_needed(DRIVE_IDS["classifier"], classifier_path)
+        _download_if_needed(DRIVE_IDS["localizer"], localizer_path)
+        _download_if_needed(DRIVE_IDS["unet"], unet_path)
 
         self.image_size = 224
 
-        # Load the trained single-task models
+        # Build single-task models and load weights if available
         classifier = VGG11Classifier(num_classes=num_breeds, in_channels=in_channels)
-        classifier.load_state_dict(torch.load(classifier_path, map_location="cpu"))
+        if os.path.exists(classifier_path):
+            classifier.load_state_dict(torch.load(classifier_path, map_location="cpu"))
 
         localizer = VGG11Localizer(in_channels=in_channels)
-        localizer.load_state_dict(torch.load(localizer_path, map_location="cpu"))
+        if os.path.exists(localizer_path):
+            localizer.load_state_dict(torch.load(localizer_path, map_location="cpu"))
 
         unet = VGG11UNet(num_classes=seg_classes, in_channels=in_channels)
-        unet.load_state_dict(torch.load(unet_path, map_location="cpu"))
+        if os.path.exists(unet_path):
+            unet.load_state_dict(torch.load(unet_path, map_location="cpu"))
 
         # Use the classifier's encoder as the shared backbone
         self.encoder = classifier.encoder
 
-        # Classification head (from classifier)
+        # Classification head
         self.classification_head = classifier.classifier
 
-        # Localization head (from localizer)
+        # Localization head
         self.localization_head = localizer.regressor
 
-        # Segmentation decoder (from unet - everything except the encoder)
+        # Segmentation decoder
         self.up5 = unet.up5
         self.dec5 = unet.dec5
         self.up4 = unet.up4
@@ -79,19 +104,18 @@ class MultiTaskPerceptionModel(nn.Module):
             - 'localization': [B, 4] bounding box tensor.
             - 'segmentation': [B, seg_classes, H, W] segmentation logits tensor
         """
-        # Shared encoder pass with skip connections for segmentation
         bottleneck, features = self.encoder(x, return_features=True)
 
-        # === Classification ===
+        # Classification
         cls_feat = bottleneck.view(bottleneck.size(0), -1)
         classification = self.classification_head(cls_feat)
 
-        # === Localization ===
+        # Localization
         loc_feat = bottleneck.view(bottleneck.size(0), -1)
         bbox_norm = self.localization_head(loc_feat)
         localization = bbox_norm * self.image_size
 
-        # === Segmentation (decoder) ===
+        # Segmentation
         d5 = self.up5(bottleneck)
         d5 = torch.cat([d5, features["block5"]], dim=1)
         d5 = self.dec5(d5)
