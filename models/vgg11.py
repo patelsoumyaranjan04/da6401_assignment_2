@@ -75,6 +75,19 @@ class VGG11Encoder(nn.Module):
             nn.ReLU(inplace=True),
         )
         self.pool5 = nn.MaxPool2d(kernel_size=2, stride=2)
+        
+        # Proper weight initialization (critical for training from scratch)
+        self._init_weights()
+    
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.ones_(m.weight)
+                nn.init.zeros_(m.bias)
 
     def forward(
         self, x: torch.Tensor, return_features: bool = False
