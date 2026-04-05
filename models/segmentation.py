@@ -91,6 +91,18 @@ class VGG11UNet(nn.Module):
         self.final_conv = nn.Conv2d(64, num_classes, kernel_size=1)
         
         self.dropout = CustomDropout(p=dropout_p)
+        
+        # Init decoder weights
+        for m in [self.up5, self.dec5, self.up4, self.dec4, self.up3, self.dec3,
+                  self.up2, self.dec2, self.up1, self.dec1, self.final_conv]:
+            for layer in m.modules():
+                if isinstance(layer, (nn.Conv2d, nn.ConvTranspose2d)):
+                    nn.init.kaiming_normal_(layer.weight, mode='fan_out', nonlinearity='relu')
+                    if layer.bias is not None:
+                        nn.init.zeros_(layer.bias)
+                elif isinstance(layer, nn.BatchNorm2d):
+                    nn.init.ones_(layer.weight)
+                    nn.init.zeros_(layer.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass for segmentation model.
