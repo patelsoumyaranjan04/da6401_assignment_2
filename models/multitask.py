@@ -14,7 +14,7 @@ from .segmentation import VGG11UNet
 DRIVE_IDS = {
     "classifier": "1XHUF72fPxKJKHC6v3ZxPxTBBwvdv3F-c",
     "localizer": "1WNu0Nb6ScgIrfZU-DUM3yZ7RJimgdDAb",
-    "unet": "<unet.pth drive id>",
+    "unet": "1NCPiEkzlfWmzVvwXBq0cGkcke_ABEUBX",
 }
 
 
