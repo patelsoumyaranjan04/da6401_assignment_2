@@ -22,7 +22,7 @@ from models.segmentation import VGG11UNet
 from models.layers import CustomDropout
 from losses.iou_loss import IoULoss
 from data.pets_dataset import OxfordIIITPetDataset
-
+WANDB_ENABLED = False
 
 def dice_score(pred, target, num_classes=3, eps=1e-6):
     """Compute mean Dice score across classes."""
@@ -39,7 +39,8 @@ def dice_score(pred, target, num_classes=3, eps=1e-6):
 
 def train_classifier(args):
     """Train the VGG11 classification model."""
-    wandb.init(project="assignment2-pets", name=f"classifier_dropout{args.dropout_p}", config=vars(args))
+    if (WANDB_ENABLED):
+        wandb.init(project="assignment2-pets", name=f"classifier_dropout{args.dropout_p}", config=vars(args))
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
@@ -102,7 +103,8 @@ def train_classifier(args):
         
         scheduler.step()
         
-        wandb.log({
+        if (WANDB_ENABLED):
+            wandb.log({
             "epoch": epoch,
             "train/loss": train_loss,
             "train/accuracy": train_acc,
@@ -118,7 +120,8 @@ def train_classifier(args):
             torch.save(model.state_dict(), "classifier.pth")
             print(f"  -> Saved best classifier (val_acc={val_acc:.4f})")
     
-    wandb.finish()
+    if (WANDB_ENABLED):
+        wandb.finish()
 
 
 def compute_iou_batch(pred, target):
@@ -150,7 +153,8 @@ def train_localizer(args):
       Phase 1 (epochs 0-9): Freeze encoder, train regressor head only
       Phase 2 (epochs 10+): Unfreeze last 2 encoder blocks, fine-tune end-to-end
     """
-    wandb.init(project="assignment2-pets", name="localizer", config=vars(args))
+    if (WANDB_ENABLED):
+        wandb.init(project="assignment2-pets", name="localizer", config=vars(args))
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
@@ -255,7 +259,8 @@ def train_localizer(args):
         val_acc_75 = val_iou_above_75 / total
         scheduler.step()
         
-        wandb.log({
+        if (WANDB_ENABLED):
+            wandb.log({
             "epoch": epoch,
             "train/loss": train_loss_avg,
             "val/loss": val_loss_avg,
@@ -271,13 +276,15 @@ def train_localizer(args):
             torch.save(model.state_dict(), "localizer.pth")
             print(f"  -> Saved best localizer (val_iou={val_mean_iou:.4f})")
     
-    wandb.finish()
+    if (WANDB_ENABLED):
+        wandb.finish()
 
 
 def train_segmentation(args):
     """Train the VGG11 U-Net segmentation model."""
     freeze_name = args.freeze_strategy if args.freeze_strategy else "full_finetune"
-    wandb.init(project="assignment2-pets", name=f"unet_{freeze_name}", config=vars(args))
+    if (WANDB_ENABLED):
+        wandb.init(project="assignment2-pets", name=f"unet_{freeze_name}", config=vars(args))
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
@@ -366,7 +373,8 @@ def train_segmentation(args):
         
         scheduler.step()
         
-        wandb.log({
+        if (WANDB_ENABLED):
+            wandb.log({
             "epoch": epoch,
             "train/loss": train_loss,
             "train/dice": train_dice_avg,
@@ -382,7 +390,8 @@ def train_segmentation(args):
             torch.save(model.state_dict(), "unet.pth")
             print(f"  -> Saved best unet (val_dice={val_dice_avg:.4f})")
     
-    wandb.finish()
+    if (WANDB_ENABLED):
+        wandb.finish()
 
 
 def main():
