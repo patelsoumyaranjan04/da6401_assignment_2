@@ -13,7 +13,7 @@ from .segmentation import VGG11UNet
 # Google Drive file IDs — REPLACE these with your actual IDs
 DRIVE_IDS = {
     "classifier": "1XHUF72fPxKJKHC6v3ZxPxTBBwvdv3F-c",
-    "localizer": "16zjN4oq_PLIkV0AE_jhl7axLKjAkSmzP",
+    "localizer": "1WNu0Nb6ScgIrfZU-DUM3yZ7RJimgdDAb",
     "unet": "<unet.pth drive id>",
 }
 
