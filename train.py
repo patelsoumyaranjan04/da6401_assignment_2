@@ -144,7 +144,12 @@ def compute_iou_batch(pred, target):
 
 
 def train_localizer(args):
-    """Train the VGG11 localization model with MSE + IoU loss."""
+    """Train the VGG11 localization model with SmoothL1 + IoU loss.
+    
+    Two-phase training:
+      Phase 1 (epochs 0-9): Freeze encoder, train regressor head only
+      Phase 2 (epochs 10+): Unfreeze last 2 encoder blocks, fine-tune end-to-end
+    """
     wandb.init(project="assignment2-pets", name="localizer", config=vars(args))
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -163,28 +168,42 @@ def train_localizer(args):
     
     model = VGG11Localizer(dropout_p=args.dropout_p).to(device)
     
-    # Load pretrained encoder from classifier and freeze it
+    # Load pretrained encoder from classifier
     if os.path.exists("classifier.pth"):
         print("Loading pretrained encoder from classifier.pth")
         cls_state = torch.load("classifier.pth", map_location="cpu")
         encoder_state = {k.replace("encoder.", ""): v for k, v in cls_state.items() if k.startswith("encoder.")}
         model.encoder.load_state_dict(encoder_state)
     
-    # Freeze encoder — it's already well-trained, only train the regression head
+    # Phase 1: freeze entire encoder
     for param in model.encoder.parameters():
         param.requires_grad = False
-    print("Encoder frozen, training regressor head only")
+    print("Phase 1: Encoder frozen, training regressor head only")
     
-    mse_loss = nn.MSELoss()
+    smooth_l1 = nn.SmoothL1Loss()
     iou_loss = IoULoss(reduction="mean")
     
-    # Only optimize regressor params
+    UNFREEZE_EPOCH = 10  # unfreeze after this many epochs
+    
     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), 
                            lr=args.lr, weight_decay=5e-4)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     
     best_val_iou = 0
     for epoch in range(args.epochs):
+        # Phase 2: unfreeze last 2 encoder blocks and rebuild optimizer
+        if epoch == UNFREEZE_EPOCH:
+            print("Phase 2: Unfreezing encoder blocks 4-5 for fine-tuning")
+            for name, param in model.encoder.named_parameters():
+                if "block4" in name or "block5" in name:
+                    param.requires_grad = True
+            # Rebuild optimizer with all trainable params, lower LR for encoder
+            optimizer = optim.Adam([
+                {"params": model.regressor.parameters(), "lr": args.lr},
+                {"params": [p for n, p in model.encoder.named_parameters() if p.requires_grad], "lr": args.lr * 0.1},
+            ], weight_decay=5e-4)
+            scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs - UNFREEZE_EPOCH)
+        
         model.train()
         train_loss_total, total = 0, 0
         for batch in train_loader:
@@ -194,12 +213,12 @@ def train_localizer(args):
             optimizer.zero_grad()
             pred = model(images)
             
-            # Normalize both to [0,1] for MSE so it's in same scale as IoU loss
+            # Normalize both to [0,1] for SmoothL1 so it's in same scale as IoU loss
             pred_norm = pred / model.image_size
             bbox_norm = bboxes / model.image_size
-            loss_mse = mse_loss(pred_norm, bbox_norm)
+            loss_reg = smooth_l1(pred_norm, bbox_norm)
             loss_iou = iou_loss(pred, bboxes)
-            loss = loss_mse + loss_iou
+            loss = loss_reg + loss_iou
             loss.backward()
             optimizer.step()
             
@@ -210,7 +229,7 @@ def train_localizer(args):
         
         # Validate
         model.eval()
-        val_loss_total, val_iou_sum, val_iou_above_50, total = 0, 0, 0, 0
+        val_loss_total, val_iou_sum, val_iou_above_50, val_iou_above_75, total = 0, 0, 0, 0, 0
         with torch.no_grad():
             for batch in val_loader:
                 images = batch["image"].to(device)
@@ -219,20 +238,21 @@ def train_localizer(args):
                 
                 pred_norm = pred / model.image_size
                 bbox_norm = bboxes / model.image_size
-                loss_mse = mse_loss(pred_norm, bbox_norm)
+                loss_reg = smooth_l1(pred_norm, bbox_norm)
                 loss_iou = iou_loss(pred, bboxes)
-                loss = loss_mse + loss_iou
+                loss = loss_reg + loss_iou
                 val_loss_total += loss.item() * images.size(0)
                 
-                # Track IoU metrics
                 ious = compute_iou_batch(pred, bboxes)
                 val_iou_sum += ious.sum().item()
                 val_iou_above_50 += (ious >= 0.5).sum().item()
+                val_iou_above_75 += (ious >= 0.75).sum().item()
                 total += images.size(0)
         
         val_loss_avg = val_loss_total / total
         val_mean_iou = val_iou_sum / total
         val_acc_50 = val_iou_above_50 / total
+        val_acc_75 = val_iou_above_75 / total
         scheduler.step()
         
         wandb.log({
@@ -241,11 +261,11 @@ def train_localizer(args):
             "val/loss": val_loss_avg,
             "val/mean_iou": val_mean_iou,
             "val/acc_iou50": val_acc_50,
+            "val/acc_iou75": val_acc_75,
         })
         
-        print(f"Epoch {epoch+1}/{args.epochs} | Train Loss: {train_loss_avg:.4f} | Val Loss: {val_loss_avg:.4f} | Val mIoU: {val_mean_iou:.4f} | Val Acc@0.5: {val_acc_50:.4f}")
+        print(f"Epoch {epoch+1}/{args.epochs} | Train: {train_loss_avg:.4f} | Val: {val_loss_avg:.4f} | mIoU: {val_mean_iou:.4f} | @0.5: {val_acc_50:.4f} | @0.75: {val_acc_75:.4f}")
         
-        # Save based on IoU, not loss
         if val_mean_iou > best_val_iou:
             best_val_iou = val_mean_iou
             torch.save(model.state_dict(), "localizer.pth")
