@@ -121,6 +121,28 @@ def train_classifier(args):
     wandb.finish()
 
 
+def compute_iou_batch(pred, target):
+    """Compute IoU for a batch. Boxes in (cx, cy, w, h) pixel format."""
+    # Convert to corners
+    p_x1 = pred[:, 0] - pred[:, 2] / 2
+    p_y1 = pred[:, 1] - pred[:, 3] / 2
+    p_x2 = pred[:, 0] + pred[:, 2] / 2
+    p_y2 = pred[:, 1] + pred[:, 3] / 2
+    t_x1 = target[:, 0] - target[:, 2] / 2
+    t_y1 = target[:, 1] - target[:, 3] / 2
+    t_x2 = target[:, 0] + target[:, 2] / 2
+    t_y2 = target[:, 1] + target[:, 3] / 2
+    ix1 = torch.max(p_x1, t_x1)
+    iy1 = torch.max(p_y1, t_y1)
+    ix2 = torch.min(p_x2, t_x2)
+    iy2 = torch.min(p_y2, t_y2)
+    inter = torch.clamp(ix2 - ix1, min=0) * torch.clamp(iy2 - iy1, min=0)
+    area_p = (p_x2 - p_x1) * (p_y2 - p_y1)
+    area_t = (t_x2 - t_x1) * (t_y2 - t_y1)
+    union = area_p + area_t - inter
+    return inter / (union + 1e-6)
+
+
 def train_localizer(args):
     """Train the VGG11 localization model with MSE + IoU loss."""
     wandb.init(project="assignment2-pets", name="localizer", config=vars(args))
@@ -141,20 +163,27 @@ def train_localizer(args):
     
     model = VGG11Localizer(dropout_p=args.dropout_p).to(device)
     
-    # Optionally load pretrained encoder from classifier
+    # Load pretrained encoder from classifier and freeze it
     if os.path.exists("classifier.pth"):
         print("Loading pretrained encoder from classifier.pth")
         cls_state = torch.load("classifier.pth", map_location="cpu")
         encoder_state = {k.replace("encoder.", ""): v for k, v in cls_state.items() if k.startswith("encoder.")}
         model.encoder.load_state_dict(encoder_state)
     
+    # Freeze encoder — it's already well-trained, only train the regression head
+    for param in model.encoder.parameters():
+        param.requires_grad = False
+    print("Encoder frozen, training regressor head only")
+    
     mse_loss = nn.MSELoss()
     iou_loss = IoULoss(reduction="mean")
     
-    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=5e-4)
+    # Only optimize regressor params
+    optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), 
+                           lr=args.lr, weight_decay=5e-4)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     
-    best_val_loss = float("inf")
+    best_val_iou = 0
     for epoch in range(args.epochs):
         model.train()
         train_loss_total, total = 0, 0
@@ -164,7 +193,11 @@ def train_localizer(args):
             
             optimizer.zero_grad()
             pred = model(images)
-            loss_mse = mse_loss(pred, bboxes)
+            
+            # Normalize both to [0,1] for MSE so it's in same scale as IoU loss
+            pred_norm = pred / model.image_size
+            bbox_norm = bboxes / model.image_size
+            loss_mse = mse_loss(pred_norm, bbox_norm)
             loss_iou = iou_loss(pred, bboxes)
             loss = loss_mse + loss_iou
             loss.backward()
@@ -177,33 +210,46 @@ def train_localizer(args):
         
         # Validate
         model.eval()
-        val_loss_total, total = 0, 0
+        val_loss_total, val_iou_sum, val_iou_above_50, total = 0, 0, 0, 0
         with torch.no_grad():
             for batch in val_loader:
                 images = batch["image"].to(device)
                 bboxes = batch["bbox"].to(device)
                 pred = model(images)
-                loss_mse = mse_loss(pred, bboxes)
+                
+                pred_norm = pred / model.image_size
+                bbox_norm = bboxes / model.image_size
+                loss_mse = mse_loss(pred_norm, bbox_norm)
                 loss_iou = iou_loss(pred, bboxes)
                 loss = loss_mse + loss_iou
                 val_loss_total += loss.item() * images.size(0)
+                
+                # Track IoU metrics
+                ious = compute_iou_batch(pred, bboxes)
+                val_iou_sum += ious.sum().item()
+                val_iou_above_50 += (ious >= 0.5).sum().item()
                 total += images.size(0)
         
         val_loss_avg = val_loss_total / total
+        val_mean_iou = val_iou_sum / total
+        val_acc_50 = val_iou_above_50 / total
         scheduler.step()
         
         wandb.log({
             "epoch": epoch,
             "train/loss": train_loss_avg,
             "val/loss": val_loss_avg,
+            "val/mean_iou": val_mean_iou,
+            "val/acc_iou50": val_acc_50,
         })
         
-        print(f"Epoch {epoch+1}/{args.epochs} | Train Loss: {train_loss_avg:.4f} | Val Loss: {val_loss_avg:.4f}")
+        print(f"Epoch {epoch+1}/{args.epochs} | Train Loss: {train_loss_avg:.4f} | Val Loss: {val_loss_avg:.4f} | Val mIoU: {val_mean_iou:.4f} | Val Acc@0.5: {val_acc_50:.4f}")
         
-        if val_loss_avg < best_val_loss:
-            best_val_loss = val_loss_avg
+        # Save based on IoU, not loss
+        if val_mean_iou > best_val_iou:
+            best_val_iou = val_mean_iou
             torch.save(model.state_dict(), "localizer.pth")
-            print(f"  -> Saved best localizer (val_loss={val_loss_avg:.4f})")
+            print(f"  -> Saved best localizer (val_iou={val_mean_iou:.4f})")
     
     wandb.finish()
 
