@@ -59,8 +59,8 @@ def train_classifier(args):
     
     model = VGG11Classifier(num_classes=37, dropout_p=args.dropout_p).to(device)
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=5e-4)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     
     best_val_acc = 0
     for epoch in range(args.epochs):
@@ -151,8 +151,8 @@ def train_localizer(args):
     mse_loss = nn.MSELoss()
     iou_loss = IoULoss(reduction="mean")
     
-    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=5e-4)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     
     best_val_loss = float("inf")
     for epoch in range(args.epochs):
@@ -253,8 +253,8 @@ def train_segmentation(args):
         print("Full fine-tuning: all parameters trainable")
     
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr, weight_decay=1e-4)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
+    optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr, weight_decay=5e-4)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     
     best_val_dice = 0
     for epoch in range(args.epochs):
