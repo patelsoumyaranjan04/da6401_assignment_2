@@ -22,7 +22,7 @@ from models.segmentation import VGG11UNet
 from models.layers import CustomDropout
 from losses.iou_loss import IoULoss
 from data.pets_dataset import OxfordIIITPetDataset
-WANDB_ENABLED = False
+WANDB_ENABLED = True
 
 def dice_score(pred, target, num_classes=3, eps=1e-6):
     """Compute mean Dice score across classes."""
