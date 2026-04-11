@@ -154,7 +154,7 @@ def train_localizer(args):
       Phase 2 (epochs 10+): Unfreeze last 2 encoder blocks, fine-tune end-to-end
     """
     if (WANDB_ENABLED):
-        wandb.init(project="assignment2-pets", name="localizer", config=vars(args))
+        wandb.init(project="assignment2-report", name="localizer", config=vars(args))
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
