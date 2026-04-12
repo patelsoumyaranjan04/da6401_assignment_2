@@ -4,7 +4,7 @@ A VGG11-based multi-task perception system on the Oxford-IIIT Pet dataset (37 br
 ## W&B Report
 W&B Report Link - https://wandb.ai/samwellthorson04-iit-madras/assignment2-report/reports/Assignment-2--VmlldzoxNjQ2MTM3OA?accessToken=q3vre8bl0elxp4qea53pzxk6trvp7pkdenelnsfs02ta65ktlno6a1s32yx0r8vo
 
-Github Repo link- 
+Github Repo link- https://github.com/patelsoumyaranjan04/da6401_assignment_2/tree/finald
 ## Architecture
 
 - **VGG11 Encoder** — 8 conv layers with BatchNorm
